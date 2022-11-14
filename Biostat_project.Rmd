@@ -1,0 +1,315 @@
+---
+title: "Projet Biostatistiques "
+output: html_notebook
+author: Lucie Gaspard-Boulinc
+date: Novembre 2022
+---
+
+# Context du project
+
+## Le cancer du sein
+
+Le cancer est une maladie caractérisee par la proliferation incontrôlee de cellules, liee à un echappement aux mecanismes de regulation qui assure le developpement harmonieux de notre organisme 1.En se multipliant de façon anarchique, les cellules cancereuses donnent naissance à des tumeurs de plus en plus grosses qui se developpent en envahissant puis detruisant les zones qui les entourent. La cellule cancereuse qui se detache de la tumeur, peut migrer dans une autre partie du corps voisine voire un autre organe pour creer une nouvelle tumeur. Un des premiers signes de cette capacite invasive des cellules tumorales est leur presence dans les ganglions lymphatiques proches du lieu de la tumeur primaire.
+
+Le cancer du sein est le cancer le plus fréquent chez la femme. Il représente plus du tiers de l’ensemble des nouveaux cas de cancer chez la femme en France. Seule une petite partie des cancers du sein, 5 à 10%, sont héréditaires, c’est-à-dire attribuable à une mutation génétique (qu’elle soit identifiée ou non).La recherche a permis d’identifier un certain nombre de mutations génétiques favorisant la survenue de cancers du sein chez les femmes. Le plus souvent, celles-ci portent sur des gènes appelés BRCA1 et BRCA2 (pour BReast Cancer 1/2 : gène 1/2 du cancer du sein). Il s’agit ici d’une predisposition genetique mais de multiples facteurs de risques favorisent l’apparition du cancer du sein 2.
+
+Une particularité du cancer du sein est qu’il s’agit dans 60 à 70 % des cas d’un cancer hormonodepen- dant. Les tumeurs hormonodépendantes se forment prin- cipalement dans des tissus dont le fonctionnement est normalement régulé par des hormones. Notamment chez les femmes atteintes d’un cancer du sein, les hormones sexuelles telles que la progesterone et l’oestrogene jouent un role dans le developpement et la progression de la tumeurs 3.
+
+
+La prise en charge des patientes atteintes d’un cancer du sein se fait dans un premier temps par une étude diagnostiques visant à établir l’étendue de la maladie, ou stade (Grade ou Stage en anglais). Cette classification des patientes se fondent sur la taille de la tumeur, l’invasion des ganglions lymphatiques et la présence de nouvelles tumeurs dans d’autres organes (metastases). Une fois le stade determiné, des examens complementaires sont réalisés par exemple pour determiner si les cellules tumorales presentent à leur surface des recepteurs aux hormones rendant le cancer hormonodependant. Toutes ces informations rasssembleées permettent ensuite d’orienter le
+traitement du cancer vers les differentes solutions existantes
+
+## Les données 
+
+Le jeu de données contient des informations de patientes atteintes de cancers du sein issues de la base de données du programme SEER de l’Institut national du cancer (NCI) aux Etats-Unis. Le NCI s’attache à fournir des statis- tiques sur le cancer afin de réduire son incidence et le fardeau qu’il represente pour la population et le systeme de santé.
+Ce jeu de données repertorie particulierement des femmes atteintes d’un sous type de cancer du sein : des carcinomes lobulaires invasifs. Les données sont issues de la mise à jour du programme SEER de Novembre 2017 mais les patientes ont ete diagnostiquées entre 2006 et 2010.
+Les variables rapportées dans le fichier (SEER breast cancer.csv) sont des informations sur la patiente (age, vivante ou decede) et des informations sur son cancer telles que la taille de la tumeurs, la positivité aux hormones et le grade du cancer en fonctions de plusieurs classifications. Vous trouverez la description de chaque variable dans le fichier SEER breast cancer description.csv.
+
+# Étude des données
+
+Dans un premier temps, nous allons faire une analyse descriptive des données afin d'apprehender le jeu de donnees et ses specificites
+En utilisant R, il faut preparer son environnement de travail en activant ou installant les packages necessaires a notre analyse. 
+
+```{r Useful-Librairies}
+# Load packages
+library(ggplot2)
+library(stringr)
+library(ggpubr)
+library(RColorBrewer)
+```
+
+```{r}
+## Color settings
+palette_status = c("darkgreen","black")
+palette_survival = RColorBrewer::brewer.pal(11,"Spectral")
+palette_ageGroup = RColorBrewer::brewer.pal(11,"BrBG")
+palette_estrogene = c("purple","violet")
+palette_progesterone = c("blue","darkblue")
+palette_marital_status = RColorBrewer::brewer.pal(5, "Pastel1")
+palette_tumorGroup = RColorBrewer::brewer.pal(11, "Set3")
+```
+
+## Lecture des donnees
+On peut desormais charger les données : 
+```{r}
+# Ici il y a un titre aux colonnes, le separateur est une virgule et on a aussi le numero de ligne
+data = read.csv2("./SEER_breast_cancer.csv", header = TRUE, sep=",", row.names = 1)
+metadata = read.csv2("./metadata_SEER_breast_cancer.csv", header = TRUE, sep=";")
+```
+
+Une premier visualisation des donnees pour verifier que nous avons bien utilise le bon separateur et le bon catactere decimal peut etre effectue en utilisant la fonction `head()` : 
+```{r}
+head(data)
+View(data)
+```
+```{r}
+metadata
+View(metadata)
+```
+
+
+## Description des variables
+
+Nous allons maintenant repondre aux questions une par une en donnant des explications et une correction pour le code. 
+
+#### Question 1 : Type des variables du jeu de donnees
+
+Les variables peuvent être classées en deux catégories principales : les catégoriques et les variables numériques.Chacune des catégories se sépare en deux sous-catégories : nominale et ordinales pour les variables catégoriques, discrètes et continues pour les variables numériques. 
+Pour acceder aux types des variables du jeu de donnes, nous pouvons utiliser la fonction `typeof()`:
+```{r}
+typeof(data$Age)
+```
+Par exemple ici, la variable `Age` est de type integer, ce qui veut dire un nombre entier et donc, il s'agit d'une variable numerique. 
+Pour l'ensemble du tableau, on peut utiliser la fonction `str()` (pour structure) : 
+```{r}
+str(data)
+```
+On peut donc voir que l'age, la taille de la tumeur, le nombre de mois de survie et les ganglions lymphatiques sont des variables numeriques (integer) tandis que toutes les autres sont des variables categorielles de type caracteres. 
+
+#### Question 2 : Infromations manquantes
+Qund on commence un nouveau projet, il est essentiel de regarder le nombre de valeur manquantes pour parachever le nettoyage des donnees si necessaires mais aussi pour faire attention lorsque des tests statistiques sont effectués. 
+```{r}
+na_count <-sapply(data, function(y) sum(is.na(y)))
+na_count <- data.frame(na_count)
+na_count # No NA in this dataset
+```
+Nous avons de la chance avec ce jeu de donnees, il n'y a pas de NA. 
+
+#### Question 3 : Informations statistiques
+
+Une premiere approches rapides pour connaitre les donnees est d'utiliser la fonction `summary()` qui calcule les quantiles et min-max des variables numeriques :
+```{r}
+summary(data)
+```
+On peut cependent raffiner cette premiere approche en calculant la moyenne et l'ecart-type
+```{r}
+# Pour une variable : Age
+mean(data$Age) #moyenne
+var(data$Age) #variance
+sd(data$Age) #ecart-type
+```
+
+```{r descriptive-stat-1}
+# Pour toutes les variables en creeant un tableau
+stat_descriptive = data.frame(matrix(ncol=4, nrow=0))
+for (col_name in colnames(data)){
+  if (typeof(data[,col_name]) == "integer"){
+    stat = c(col_name,mean(data[,col_name]),var(data[,col_name]),sd(data[,col_name]))
+    stat_descriptive=rbind(stat_descriptive,stat)
+  }
+}
+# Print the results
+colnames(stat_descriptive) = c("Variable","Moyenne","Variance","Ecart-type")
+stat_descriptive
+```
+Nous pouvons aussi compter le nombre d'occurence pour les variables categorielles.
+```{r}
+# Pour le T Stage
+summary(as.factor(data$T.Stage)) #ou
+table(data$T.Stage)
+```
+Ces variables sont en fait aa considerer comme des facteurs, il faut donc les transformer soit directement dans le tableau soit en utilisant tout le temps la fonction `as.factor()`. 
+```{r descriptive-stat-2}
+summary(as.factor(data$Marital.Status))
+summary(as.factor(data$T.Stage))
+summary(as.factor(data$N.Stage))
+summary(as.factor(data$X6th.Stage))
+summary(as.factor(data$A.Stage))
+#etc. 
+
+
+```
+
+#### Question 4 : Representation graphiques
+
+Nous commencons par donner un exemple avec la distribution des ages. 
+```{r Age-distribution}
+# stat="count calcule pour chaque age le nombre de patientes
+p1 = ggplot(data, aes(x=Age)) + geom_bar(stat = "count")
+# stat = bin autorise le regroupement en plus grande categories d'age (ici de largeur 10ans)
+p2=ggplot(data, aes(x=Age)) + geom_bar(stat = "bin", binwidth=10)
+#bin plus petite
+p3=ggplot(data, aes(x=Age)) + geom_bar(stat = "bin", binwidth=5)
+
+ggarrange(p1,p2,p3)
+```
+On continue avec les informations des patientes:
+```{r}
+p4=ggplot(data, aes(x=Status, fill=Status)) + geom_bar(stat = "count") + 
+  scale_fill_manual(values=palette_status)
+p5=ggplot(data, aes(x=as.factor(Marital.Status), fill=Marital.Status)) + geom_bar(stat = "count") + 
+  scale_fill_manual(values=palette_marital_status)+ theme(axis.text.x=element_blank())
+p6=ggplot(data, aes(x=Survival.Months)) + geom_bar(stat = "count")
+
+ggarrange(p4,p5,p6,nrow = 3)
+```
+On s'interesse aussi aux stades des tumeurs, a leur taille, aux bilans hormonaux
+```{r}
+p7=ggplot(data, aes(x=Tumor.Size)) + geom_bar(stat = "count")
+p8=ggplot(data, aes(x=as.factor(Estrogen.Status), fill=Estrogen.Status)) + geom_bar(stat = "count")+ scale_fill_manual(values=palette_estrogene)
+p9=ggplot(data, aes(x=as.factor(Progesterone.Status), fill=Progesterone.Status)) + geom_bar(stat = "count")+ scale_fill_manual(values=palette_progesterone)
+p10=ggplot(data, aes(x=Regional.Node.Examined)) + geom_bar(stat = "count")
+p11=ggplot(data, aes(x=Reginol.Node.Positive)) + geom_bar(stat = "count")
+ggarrange(p7,p8,p9,p10,p11, nrow=3, ncol=2)
+
+```
+
+Ainsi qu'a la repartition des patientes dans les differentes classifications
+```{r}
+p12=ggplot(data, aes(x=X6th.Stage)) + geom_bar(stat = "count") 
+p13=ggplot(data, aes(x=A.Stage)) + geom_bar(stat = "count") 
+p14=ggplot(data, aes(x=Grade_ICD_O_2)) + geom_bar(stat = "count") 
+p15=ggplot(data, aes(x=Grade_differentiation)) + geom_bar(stat = "count") 
+ggarrange(p12,p13,p14,p15)
+
+```
+
+#### Question 5 : Taille de la tumeur
+
+```{r, height=4, width=8}
+# En fonction des statuts des hormones
+p16=ggplot(data, aes(x=as.factor(Estrogen.Status), y=Tumor.Size, fill=Estrogen.Status))+ geom_boxplot() +
+  scale_fill_manual(values=palette_estrogene)
+
+p17=ggplot(data, aes(x=as.factor(Progesterone.Status), y=Tumor.Size, fill=Progesterone.Status))+ geom_boxplot() + 
+  scale_fill_manual(values=palette_progesterone)
+
+ggarrange(p16,p17)
+
+# Un exemple d'utilisation de la fonction facet_wrap() qui permet de representer plus de variables
+p18=ggplot(data, aes(x=as.factor(Progesterone.Status), y=Tumor.Size, fill=Estrogen.Status))+ geom_boxplot()+
+  facet_wrap(.~Estrogen.Status) + scale_fill_manual(values=palette_estrogene)
+
+p18
+
+```
+```{r}
+ggplot(data, aes(x=as.factor(N.Stage), y=Tumor.Size))+ geom_boxplot()
+ggplot(data, aes(x=as.factor(T.Stage), y=Tumor.Size))+ geom_boxplot()
+```
+```{r}
+#En fonction de l'age
+ggplot(data, aes(x=Age, y=Tumor.Size, group=Age))+ geom_boxplot()
+# on peut utiliser dans le aes(group= ) pour indiquer de rassembler par petits groupes (ici de meme Age) les valeurs
+ggplot(data, aes(x=Age, y=Tumor.Size, group=Age))+ geom_boxplot()
+```
+#### Question 6 : Recodage
+
+D'apres les representations que nous avons vu, il parait interessant de recoder les variables "Age" et ""Survival.Month" qui sont des variables continues.
+
+```{r}
+# Age
+## Dans un premier temps, on regarde quelles sont les valeurs min-max
+summary(data$Age)
+
+## Ensuite on recode la variable avec les valeurs
+### On cree les differentes classe d'age
+labs <- c(paste(seq(30, 65, by = 5), seq(30 + 5 - 1, 70 - 1, by = 5),
+                sep = "-"), paste(70, "+", sep = ""))
+
+## On cree la nouvelle colonne
+data$AgeGroup <- cut(data$Age, breaks = c(seq(30, 70, by = 5), Inf), labels = labs, right = FALSE)
+
+## On verifie que cela a bien fonctionne
+table(data$Age)
+table(data$AgeGroup)
+```
+
+```{r}
+# On fait de meme avec la variable Survival.Months
+summary(data$Survival.Months)
+
+# Recode la variable
+labs_survival <- c(paste(seq(0, 95, by = 10), seq(0 + 5 - 1, 100 - 1, by = 10),
+                         sep = "-"), paste(100, "+", sep = ""))
+data$SurvivalGroup <- cut(data$Survival.Months, breaks = c(seq(0, 100, by = 10), Inf), labels = labs_survival, right = FALSE)
+
+## On verifie que cela a bien fonctionne
+table(data$Survival.Months)
+table(data$SurvivalGroup)
+
+```
+Ces premieres figures terminent la partie de description des variables et de prise en main du jeu de données. A l'issu de cette partie exploratoire, vous devez avoir une petite idee de l'ensemble des donnees, a quoi ressemble votre population et quelques premieres idees d'analyses a faire.
+Cette etape est essentiel en debut de chaque projet car elle vous permet d'apprehender votre jeu de donnees avant de developper des analyses plus poussees. 
+
+
+## Analyses
+
+#### Question 1 : T.Stage et lien avec la taille de la tumeur
+```{r}
+# Premiere partie : selection des patientes avec T.Stage = T1,T2 ou T3
+table(data$T.Stage)
+
+#We select by the exclusion : we want all T1,T2 T3 so we don't want T4
+data_tstage = data[data$T.Stage != "T4",]
+table(data_tstage$T.Stage)
+
+# Make a plot to illustrate T.Stage ~ Tumor size
+ggplot(data_tstage, aes(x=as.factor(T.Stage), y=Tumor.Size, fill=T.Stage))+ geom_boxplot() +
+  xlab("T Stage") + ylab("Taille de la tumeur")
+
+ 
+```
+Ici, on nous demande d'evaluer le lien entre le T.Stage et la taille de la tumeur. Nous allons donc effectuer un ANOVA sur 3 groupes
+```{r}
+# One-way ANOVA : on ne compare que des variables une a une
+one.way <- aov(Tumor.Size ~ T.Stage, data = data_tstage)
+summary(one.way)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
