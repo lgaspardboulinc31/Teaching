@@ -8,5 +8,5 @@ Le projet se déroule en trois temps. Une première partie où les étudiants et
 
 Dans ce repertoire, vous trouverez : 
   - les données et métadonnées : [Data](./SEER_breast_cancer.csv) et [Metadata](./metadata_SEER_breast_cancer.csv)
-  - un notebook de correction de la partie guidée : 
-  - le sujet du projet de biostatistiques dans son integralité : 
+  - un notebook de correction de la partie guidée : [Notebook](./Biostat_project.Rmd)
+  - le sujet du projet de biostatistiques dans son integralité : [Sujet](./L3_Biostat.pdf)
