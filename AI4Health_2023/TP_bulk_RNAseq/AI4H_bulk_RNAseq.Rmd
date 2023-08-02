@@ -1,0 +1,401 @@
+---
+title: "RNA-seq data analysis for cancer patient stratification"
+author: "Lucie Gaspard-Boulinc - Pierre Gestraud - Loredana Martignetti"
+date: "AI4Health school - July 2023"
+output: 
+  rmdformats::material:
+    use_bookdown: true
+    thumbnails: false
+header-includes:
+  - \usepackage{subfig}
+  - \usepackage{booktabs}
+  - \usepackage{xcolor}
+  - \usepackage{tcolorbox}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, eval = TRUE,  cache=FALSE, include=FALSE}
+# workDir <- "/bioinfo/users/gestraud/formations/AI4Health/ai4health"
+# knitr::opts_knit$set(root.dir = workDir) ## = setwd()
+knitr::opts_chunk$set(cache = FALSE)
+options(knitr.table.format = "html")
+```
+
+# Libraries and environment
+
+## Load environment
+
+Libraries used to create and generate this report: 
+
+```{r librariesEnvironment, echo = FALSE, message = FALSE, warning = FALSE}
+library("rmarkdown")
+library("knitr")
+library("rmdformats")
+library("bookdown")
+library("kableExtra")
+```
+
+- R : ``r R.version$version.string``
+- rmarkdown : ``r packageVersion("rmarkdown")``
+- knitr : ``r packageVersion("knitr")``
+- rmdformats : ``r packageVersion("rmdformats")``
+- bookdown : ``r packageVersion("bookdown")``
+- kableExtra : ``r packageVersion("kableExtra")``
+
+## Load libraries
+
+Libraries used for data analysis: 
+
+```{r librariesAnalysis, echo = TRUE, message = FALSE, warning = FALSE, cache=FALSE}
+library("DESeq2")
+library("limma")
+library("FactoMineR")
+library("factoextra")
+library("ggplot2")
+library("pheatmap")
+library("rRoma")
+library("clusterProfiler")
+library("org.Hs.eg.db")
+library("ggrepel")
+library("dendextend")
+```
+- DESeq2: ``r packageVersion("DESeq2")``
+- limma: ``r packageVersion("limma")``
+- FactoMineR: ``r packageVersion("FactoMineR")``
+- ggplot2: ``r packageVersion("ggplot2")``
+- pheatmap: ``r packageVersion("pheatmap")``
+- clusterProfiler: ``r packageVersion("clusterProfiler")``
+- org.Hs.eg.db: ``r packageVersion("org.Hs.eg.db")``
+- rRoma: ``r packageVersion("rRoma")``
+
+# Description of the RNA-seq dataset 
+In this tutorial, we will try a typical workflow for RNA-sequencing data analysis.  We will use the TB dataset, which consists of gene expression profiles on 41 tumor biopsies from cancer patients. 
+
+- RNA-seq is the high-troughput sequencing of cDNA using NGS technologies
+- RNA-seq works by sequencing evry RNA molecule and profiling the expression of genes by counting the number of times their transcripts have been sequenced.
+- The summarized RNA-seq output is a *count matrix*.
+
+
+You can read more about how the data was processed [here](https://bioconductor.org/packages/release/data/experiment/vignettes/airway/inst/doc/airway.html). In summary, it follows a general outline as in the figure below: first, we have a set of reads. Using an aligner and a reference genome, we determine the origin of these reads in terms of the chromosome and position within the **reference genome**. Then, we compare this information with a **reference annotation** that provides the chromosome and position details of exons in known genes.
+
+
+
+# Input data
+
+In this matrix, each row represents a gene, each column a patient sample and the values provide the raw gene expression count numbers.
+
+```{r input, echo = TRUE, message = FALSE, warning = FALSE}
+
+rna <- read.csv("data_tb/data_rna_count.csv", header = TRUE, row.names = 1)
+
+dim(rna)
+```
+
+We have some information about the sample in the sample_annotation file. We downlaod prior knowledge of experimental design for patient samples.
+
+```{r design, echo = TRUE, message = FALSE, warning = FALSE}
+
+design <- read.csv("data_tb/design.csv", header = TRUE, row.names = 1)
+design <- design[colnames(rna),]
+hospital <- as.factor(design$Hospital)
+group <- as.factor(design$Group)
+design$Hospital <- as.factor(design$Hospital)
+design$Group <- as.factor(design$Group)
+
+```
+
+Tumor biopsies are collected from different hospitals and assigned to a unique sample ID.
+Clinical classification of these tumors based primarily on morphology (histopathology) and available clinicopathological parameters identified four different **disease subgroups** that are associated to different outcomes and are used to direct treatment strategies.
+
+With recent developments in omics profiling, there have been significant advancements in the field of tumor classification, leading to a deeper understanding of the molecular characteristics and heterogeneity of tumors.  This enhanced classification allows for more **precise and personalized treatment strategies**, as it helps to identify predictive biomarkers and potential therapeutic targets specific to each tumor subgroup.
+
+# Quality control of raw counts
+
+Our count matrix contains many rows with only zeros, and additionally many rows with only a few count total. In order to reduce the size of the matrix, and to increase the speed of our analyses, we can remove the rows that have no or nearly no information about the amount of gene expression.
+
+```{r QC, echo = TRUE, message = FALSE, warning = FALSE}
+
+g.zero <- rowSums(rna == 0) # Number of zero counts per gene
+s.zero <- colSums(rna == 0) # Number of features (genes) with zero counts per sample
+
+barplot(colSums(rna), main = "Total counts per sample", ylab = "Total counts", las=1, las=2, cex.axis= 0.8, cex.names=0.8 )
+grid()
+barplot(s.zero/nrow(rna), main = "Proportion of null features per sample", ylab = "Proportion of null counts", las=2, cex.names=0.8 )
+grid()
+
+dim(rna)
+
+keep <- rowSums(rna) >= 10 # Keep only rows that have at least 10 reads total.
+rna <- rna[keep,]
+
+dim(rna)
+
+
+```
+
+
+# Normalization
+
+Box plot for the gene expression data before normalization. The black bar indicates the median value. These distributions need to be similar for the different samples to be comparable. If this is not the case, the data should be normalised.
+
+```{r boxplot, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+boxplot(log(rna + 1))
+```
+
+We create a DESeq object from the data matrix and apply normalization by DESeq method
+
+```{r norm, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+dds <- DESeqDataSetFromMatrix(countData = rna, colData = design, design = ~ Hospital+Group) 
+### DESeq normalization
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+
+rna.norm <- counts(dds, normalized=TRUE)
+boxplot(log(rna.norm+1))
+log.rna.norm <- log(rna.norm+1)
+```
+
+
+# Principal component analysis
+
+We can use principal component analysis (PCA) for reducing our large scale data matrix into few major components. Exploratory analysis by PCA is crucial for quality control and gaining initial insights into our dataset. It can help us detect quality problems, sample swaps and contamination, as well as give us a sense of the most salient patterns present in the data, their structure and variability.
+
+We use `FactoMineR`, an R package dedicated to multidimensional exploratory analysis of data.
+
+```{r pca, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+pca.rna <- PCA(t(log.rna.norm), graph = FALSE)
+```
+
+## Explore PCA results
+
+The proportion of variances retained by the principal components can be visualized by with a **scree plot**, which is a graph of the eigenvalues/variances associated with components.
+
+```{r pcaplot, cache = FALSE, eval=TRUE, echo=TRUE, message = FALSE,warning = FALSE}
+
+## display eigen values
+fviz_eig(pca.rna)
+
+```
+
+Other functions are available to visualize samples in the PCA space:
+
+```{r pcaplot2, cache = FALSE, eval=TRUE, echo=TRUE, message = FALSE,warning = FALSE}
+
+## display samples
+fviz_pca_ind(pca.rna, habillage = design$Group)
+fviz_pca_ind(pca.rna, habillage = design$Group, axes = c(3,4))
+
+```
+
+:::: {.blackbox data-latex=""}
+::: {.center data-latex=""}
+**Question: how many tumor subgroups do you observe?**
+::: 
+::::
+
+We can further explore which of the original variables are contributing the most to the various PCs by inspecting their barplot.
+
+```{r pcaplot3, cache = FALSE, eval=TRUE, echo=TRUE, message = FALSE,warning = FALSE}
+
+## most contributing genes 
+fviz_contrib(pca.rna, choice = "var", top = 30, axes = 1)
+fviz_contrib(pca.rna, choice = "var", top = 30, axes = 2)
+```
+
+
+# Clustering
+
+Unsupervised clustering methods are widely used for data exploration and generating hypotheses. The aim is to partition data according to natural classes present in it, assigning samples that are "more similar" to the same "cluster".
+
+To perform clustering, the first step is to compute the distance between each sample:
+
+```{r distance, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+d <- dist(t(log.rna.norm))
+```
+
+We can perform hierarchical clustering based on the distances defined above using the `hclust` function. This function returns an hclust object that describes the groupings that were created using the algorithm described above. The plot method represents these relationships with a tree or dendrogram:
+
+```{r clustering, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+hc <- hclust(d, method = "ward.D")
+plot(hc, hang = -1)
+dend <- as.dendrogram(hc)
+colored_bars(as.numeric(design$Group), dend = dend)
+```
+
+Based on the dendogram, we can cut the tree into **k** clusters that represents our classes.
+
+# Differential expression for RNA-seq
+
+The standard differential expression analysis steps are performed by a single function, DESeq. 
+Results tables are generated using the function results, which extracts a results table with log2 fold changes, p values and adjusted p values. 
+We can select significantly different expressed genes according to a given p-value threshold
+
+```{r deseq, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+
+dds <- DESeq(dds)
+res <- results(dds, contrast = c("Group", "G4", "G3"))
+sum(res$padj<=0.05, na.rm = TRUE)
+```
+
+## Heatmap visualization
+
+We can visualize our results with a heatmap. Here we display the top 50 most differentially expressed genes. 
+
+```{r heatmap, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+res <- res[order(res$padj),]
+top50 <- res[1:50, ]
+top50.mat <- log.rna.norm[rownames(top50),]
+pheatmap(top50.mat, scale="row", annotation_col = design, clustering_distance_rows = "correlation", clustering_method = "ward.D")
+```
+
+# Downstream analysis and gene-set testing
+
+The **volcano plot** is a classical representation of the results of a differential expression analysis. In such a plot we display the -log10 of the pvalue as a function of the log2 fold change. Here we also display the names of the 10 genes with the lowest pvalues as an example.
+
+```{r volcano, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+res_df <- as.data.frame(res)
+res_df$symbol <- rownames(res_df)
+
+ggplot(as.data.frame(res), aes(x = log2FoldChange, y = -log10(pvalue))) + 
+  geom_point() + 
+  geom_label_repel(aes(label = symbol), data = res_df[1:10,]) + 
+  theme_light()
+```
+
+To interpret the list of differentially expressed genes, we can look for common biological functions among them. Several databases exist to link genes and biological functions, one the most used is **Gene Ontology** (GO). The `enrichGO` function from `clusterProfiler` will search for gene sets that are enriched in GO categories.  
+
+```{r enrich_GO}
+## select list of differentially expressed genes with sufficient logFC
+genes_signif <- rownames(res)[which(res$padj <= 0.05 & abs(res$log2FoldChange)>=1)]
+
+res_GO <- enrichGO(gene = genes_signif, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", universe = rownames(res), ont = "BP")
+as.data.frame(res_GO)
+dotplot(res_GO)
+```
+
+
+
+# Pathway-based analysis with rROMA
+
+Large-scale molecular data, such as transcriptomics and proteomics, offers great opportunities for understanding the complexity of **biological processes**. One important aspect of data analysis in systems biology is the shift from a reductionist approach that focuses on individual components to a more integrative perspective that considers the system as a whole, where the emphasis shifted from differential expression of individual genes to determining the **activity of gene sets**.
+The `rROMA` algorithm is used for computation of the activity of gene sets with coordinated expression.
+
+`rRoma` requires a gene expression matrix, with column names indicating samples and row names indicating gene names.
+
+It also requires a module file containing information on the genesets that need to be evaluated. The module file can be loaded from a GMT file.
+
+The figure below illustrates a schematic diagram of the workflow of the rROMA algorithm.
+
+
+## Input dataset
+
+Warning: rRoma works with normalized data. Here the normalized TB dataset is used.
+
+```{r romaInput, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+summary(log.rna.norm)
+
+```
+
+
+We can then load sample labels:
+
+```{r romaGroup, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+Group <- design$Group
+names(Group) <- rownames(design)
+  
+table(Group)
+
+```
+
+## Selecting the module list
+
+Here, we extract all the "HALLMARK" gene sets from MSigDB (Liberzon A et al, Cell Syst 2015). 
+The Molecular Signatures Database (MSigDB) is one of the most widely used and comprehensive databases of gene sets for performing gene set enrichment analysis. 
+The collection of "Hallmark" gene sets as part of MSigDB consists of "refined" gene sets describing biological states or processes.
+
+Note that we chose the Hallmark database for explanatory purpose. To have a more complete view of biological systems at stake in your study, we recommend using rRoma with multiple databases.
+
+```{r hallmarks, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+Hallmarks <- SelectFromMSIGdb("HALLMARK")
+
+Hallmarks <- lapply(Hallmarks, function(x){
+  x$Name <- sub("HALLMARK_", "", x$Name)
+  x
+})
+
+```
+
+In case we already have a GMT file with modules we want to test, we can also load them by using the ReadGMTFile function.
+
+```{r genesets, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+#myDB <- ReadGMTFile("h.all.v6.1.symbols.gmt", SearchString = NULL, Mode = "ANY")
+
+```
+
+## Performing rROMA: basics
+
+We can now run rRoma on our dataset by simply specifying the expression dataset and the modules you want to test. Here we are fixing the seed for used for random permutations.
+
+```{r romaout, message = FALSE, results='hide', warning = FALSE}
+
+# set.seed(69)
+rRoma.output <- rRoma.R(log.rna.norm, Hallmarks)
+
+```
+
+
+## Reading the output
+
+The most important information can be found in the module matrix, here in **rRoma.output$ModuleMatrix**. It contains p and q values for overdispersion (L1) and shift (Median Exp) for all tested modules.
+
+```{r modulematrix, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+head(rRoma.output$ModuleMatrix)
+
+```
+
+We are interested in two different types of modules:
+
+    - Shifted modules, whose genes behave differently from the rest of the genes in at least one sample. Corresponding p value is in ppv Median Exp. A q value is also calculated and given in q Median Exp. Here we will consider a module as shifted if p < 0.05. We don’t look at q values here as both the number of samples and the number of tested modules is small. Consider looking at q values for larger data sets.
+
+    - Overdispersed modules, for which the approximation to one PC is correct. Corresponding p value is in ppv ML1. A q value is also calculated and given in q L1. Here we will consider a module as overdispersed if p < 0.05. We don’t look at q values for the same reason as before, but considered looking at it for larger datasets
+
+### Shifted modules
+
+We are first interested in shifted modules.
+
+```{r shifted, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+shifted.modules <- which(rRoma.output$ModuleMatrix[, "ppv Median Exp"] <= 0.05)
+
+```
+
+We want to see which samples are responsible for the shift. This can be done by looking at Sample Scores. The function plots a heatmap of these score:
+
+```{r shiftedPlot, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+Plot.Genesets.Samples(rRoma.output, Selected = shifted.modules, GroupInfo = Group, cluster_cols = TRUE)
+```
+
+This representation can help us define groups of samples that behave similarly on a pathway level.
+
+### Overdispersed modules
+
+```{r overdispersed, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+overdispersed.modules <- which(rRoma.output$ModuleMatrix[, "ppv L1"] <= 0.05 & rRoma.output$ModuleMatrix[, "ppv Median Exp"] > 0.05)
+
+```
+
+We first plot the same heatmap as before to visualize sample scores:
+
+```{r overdispersedPlot, cache = FALSE, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+Plot.Genesets.Samples(rRoma.output, Selected = overdispersed.modules, GroupInfo = Group, cluster_cols = TRUE)
+
+```

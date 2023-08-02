@@ -1,0 +1,526 @@
+---
+title: "scRNA-seq data analysis to study cell types"
+author: "Lucie Gaspard-Boulinc - Pierre Gestraud - Loredana Martignetti"
+date: "AI4Health school - July 2023"
+output: 
+  rmdformats::material:
+    use_bookdown: true
+    thumbnails: false
+    #css: "ETBII_SNF.css"
+header-includes:
+  - \usepackage{subfig}
+  - \usepackage{booktabs}
+  - \usepackage{xcolor}
+  - \usepackage{tcolorbox}
+---
+
+```{r setup, eval = TRUE, echo = FALSE}
+# set directory to file location 
+workDir <- "./" 
+knitr::opts_knit$set(root.dir = workDir) ## = setwd()
+knitr::opts_chunk$set(cache = TRUE)
+options(knitr.table.format = "html")
+```
+
+# Libraries and environment
+
+## Load environment
+
+Libraries used to create and generate this report: 
+
+```{r librariesEnvironment, echo = FALSE, message = FALSE, warning = FALSE}
+library("rmarkdown")
+library("knitr")
+library("rmdformats")
+library("bookdown")
+library("kableExtra")
+```
+
+- R : ``r R.version$version.string``
+- rmarkdown : ``r packageVersion("rmarkdown")``
+- knitr : ``r packageVersion("knitr")``
+- rmdformats : ``r packageVersion("rmdformats")``
+- bookdown : ``r packageVersion("bookdown")``
+- kableExtra : ``r packageVersion("kableExtra")``
+
+## Load libraries
+
+For this session, we will be using the R packages Seurat and Cell-ID to explore to scRNASeq data and use various reference databases for automated cell type annotations.
+
+Libraries used for data analysis: 
+
+```{r librariesAnalysis, echo = TRUE, message = FALSE, warning = FALSE}
+library(Seurat)
+library(CelliD)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(EnhancedVolcano)
+library(ggpubr)
+library(clustree)
+library(stringr)
+
+```
+
+- Seurat: ``r packageVersion("Seurat")``
+- CelliD: ``r packageVersion("CelliD")``
+- data.table: ``r packageVersion("data.table")``
+- dplyr: ``r packageVersion("dplyr")``
+- ggplot2: ``r packageVersion("ggplot2")``
+- GGally ``r packageVersion("GGally")``
+
+# Input data
+
+## Droplet based scRNA-seq systems
+
+We will use a scRNA-seq dataset from 10x Genomics R&D team. The data set consists of the conventional Peripheral Blood Mononuclear Cells (PBMC) from a single healthy donor.
+
+The droplet-based system allows efficient single cell encapsulation and performs expression profiling from hundreds of thousands of single cells. 
+
+## Read in the data and create a Seurat object
+
+The Seurat object is a representation of single-cell expression data for R; each Seurat object revolves around a set of cells and consists of one or more **Assay objects** from multiple modalities, such as 
+RNAseq, spatial transcriptomics, ATAC-seq... Seurat objects also store additional **metadata**, both at the cell and feature level (contained within individual assays). The object serves as a container for both data (like the count matrix) and analysis (like PCA, or clustering results) of a single-cell dataset.
+
+Here we create the Seurat object from a raw count matrix from scRNA-seq experiment. 
+
+```{r input, echo = TRUE, message = FALSE, warning = FALSE}
+
+pbmc.data <- readRDS(file = "./data_pbmc/pbmc10k_rna_count_matrix.RDS")
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+#Filtering parameters: keep cells with at least 200 genes, and genes expressed in at least 3 cells.
+pbmc
+
+head(pbmc@assays$RNA@counts)
+
+str(pbmc)
+```
+
+
+If available, we load the information about cell annotations in the **metadata** slot. 
+
+```{r metadata, echo = TRUE, message = FALSE, warning = FALSE}
+
+meta.data = read.csv("./data_pbmc/sample_metadata.csv", header = TRUE, row.names = 1)
+pbmc <- AddMetaData(object = pbmc, metadata = meta.data)
+```
+
+Metadata are accessible in the metadata slot of Seurat object : 
+
+```{r}
+head(pbmc@meta.data,10)
+```
+
+# Quality control of cells
+
+Seurat allows you to easily explore QC metrics and filter cells based on any user-defined criteria such as cells expressing very few genes or with aberrantly high gene count, cells with low total read counts and 
+cells with high percentage of reads that map to the mitochondrial genome (low-quality / dying cells often exhibit extensive mitochondrial contamination).
+
+We plot the distribution of each QC metric across cells to identify low-quality cells before applying some filtering.
+
+```{r QC, echo = TRUE, message = FALSE, warning = FALSE}
+# We can compute the percentage of reads that map to mitochondrial genes
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+# and also ribosomal genes
+pbmc[["percent.rps"]] <- PercentageFeatureSet(pbmc, pattern = "^RPS")
+pbmc[["percent.rpl"]] <- PercentageFeatureSet(pbmc, pattern = "^RPL")
+
+# pbmc[[name]] notation is used to access meta.data slot rather than using pbmc@meta.data$name
+```
+
+```{r figureQC}
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","percent.rpl","percent.rps"),  pt.size = 0)
+VlnPlot(pbmc, features = c("nFeature_RNA"))
+```
+
+Based on the quality metrics above, how could we subset our data to ensure good quality ?
+
+```{r}
+pbmc <- subset(pbmc, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+
+pbmc
+```
+
+**What is the proportion of cells that have been discarded?**
+
+# Normalization
+
+Systematic differences in sequencing coverage between libraries are often observed in scRNA-seq data.
+Normalization aims to remove these differences such that they do not interfere with comparisons of the expression profiles between cells.
+
+## Library size normalization
+
+By default, Seurat employs a global-scaling normalization method “LogNormalize” that normalizes the feature expression measurements for each cell by the total expression, multiplies this by a scale factor (10,000 by default), and log-transforms the result. Library size normalization is the simplest strategy for performing  normalization. 
+
+```{r normalization, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+
+head(pbmc@assays$RNA@counts, 10)
+
+head(pbmc@assays$RNA@data,10)
+```
+
+The results of this are stored in pbmc[["RNA"]]\@data.
+
+# Variance modeling and selection of highly variable genes (feature selection)
+
+We want to select genes that contain useful information about the biology of the system while removing genes that contain random noise. This aims to preserve interesting biological structure without the variance that obscures that structure, and to reduce the size of the data to improve computational efficiency of later steps. The simplest approach to feature selection is to select the most variable genes based on their expression across cells.
+
+
+```{r hvg, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(pbmc), 10)
+
+# plot variable features with and without labels
+p1 <- VariableFeaturePlot(pbmc)
+p2 <- LabelPoints(plot = p1, points = top10, repel = TRUE)
+p2
+
+```
+
+In this case, we have asked to retain 2000 highly variable genes (HVGs) for subsequent analyses.
+
+# Scaling the data
+
+Next, we apply a linear transformation (*scaling*) that is a standard pre-processing step prior to dimensional reduction techniques like PCA, so that the mean expression across cells is 0 and the variance of gene expression across cells is 1.
+
+```{r scaling, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+
+```
+
+The results of this are stored in pbmc[["RNA"]]\@scale.data
+
+# Normalization by deconvolution and variance stabilization
+
+Library size factors assume balanced differentially expressed (DE) genes between cells, where upregulation in some genes offsets downregulation in others. However, scRNA-seq data often lack this balance, leading to inaccurate library size normalization for downstream analyses.
+
+To address this issue, the `scran` package (Lun, Bach, and Marioni 2016) and the `SCTransform` (Hafemeister and Satija 2019) package have introduced methods for improved size factor estimation.
+
+In practice, normalization accuracy is not a major consideration for exploratory scRNA-seq data analyses involving cell-based analyses such as clustering. Accurate normalization is most important for procedures that involve estimation and interpretation of per-gene statistics. 
+
+```{r sct, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+# run sctransform
+pbmc <- SCTransform(pbmc, vars.to.regress = "percent.mt", verbose = FALSE)
+```
+
+
+# Principal component analysis
+
+Next we perform PCA on the scaled data. By default, only the previously determined variable features are used as input, but can be defined using *features* argument if you wish to choose a different subset and *npcs* argument to set the number of PCs.
+
+```{r pca, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+pbmc <- RunPCA(pbmc, features = all.genes, npcs = 50)
+```
+
+## Explore PCA results
+
+To visualize the data, we plot the top 2 PCs.
+
+```{r pcaplot, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+DimPlot(pbmc, reduction = "pca")
+```
+
+You can also visualize multiple PCs at the same time with a *pairplot* : 
+
+```{r fig.height=10, fig.width=10, message=FALSE}
+df_pc = as.data.frame(pbmc@reductions$pca@cell.embeddings)
+ggpairs(df_pc, columns = 1:10)
+```
+
+Furthermore, it is possible to visualize any variable within the *metadata* slot on the PC plot.
+
+```{r fig.height=5, fig.width=15}
+p1=FeaturePlot(pbmc, reduction="pca", features = "nCount_RNA")
+p2=FeaturePlot(pbmc, reduction="pca", features = "nFeature_RNA")
+p3=FeaturePlot(pbmc, reduction="pca", features = "percent.mt")
+
+ggarrange(p1,p2,p3, ncol = 3)
+
+
+```
+
+```{r}
+head(pbmc@reductions$pca@feature.loadings)
+
+
+```
+
+## Determine the dimensionality of the dataset
+
+We generate an *Elbow plot* for ranking of principle components based on the percentage of variance explained by each one (ElbowPlot() function). 
+
+```{r elbowplot, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+ElbowPlot(pbmc, reduction = "pca")
+```
+
+Identifying the true dimensionality of a dataset can be challenging. Different approaches can be applied for choosing a cutoff.
+
+:::: {.blackbox data-latex=""}
+::: {.center data-latex=""}
+**Which cutoff can be used in this analysis?**
+::: 
+::::
+
+# Non-linear methods for visualization
+
+Unlike PCA, other methods are not restricted to linear transformations, but they are not obliged to accurately represent distances between distant populations. This means that it has much more freedom in how it arranges cells in low-dimensional space, enabling it to separate many distinct clusters in a complex population.  
+
+The *uniform manifold approximation and projection (UMAP)* method (McInnes, Healy, and Melville 2018) is a commonly used option for non-linear dimensionality reduction and visualization. This exploits the data compaction and noise removal of the PCA for faster and cleaner results.
+
+```{r umap, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+pbmc <- RunUMAP(pbmc, dims = 1:10) # Here, dims referes to the number of PCs
+```
+
+We can visualize cell labels on the UMAP plot.
+As a general rule, focusing on local neighborhoods provides the safest interpretation of UMAP plots.
+
+```{r fig.height=5, fig.width=15}
+p1=DimPlot(pbmc, reduction = "umap") +NoLegend()
+p2=DimPlot(pbmc, reduction = "umap", group.by = "celltype")
+p1
+p1+p2
+```
+
+```{r}
+RunUMAP
+```
+
+
+## Other non-linear visualizations
+
+Seurat offers other non-linear dimensional reduction techniques, such as *t-stochastic neighbor embedding (t-SNE)* method (Van der Maaten and Hinton 2008), to visualize and explore these datasets. This attempts to find a low-dimensional representation of the data that preserves the distances between each point and its neighbors in the high-dimensional space.
+
+The *perplexity*”* is an important parameter that determines the granularity of the visualization. Low perplexities will favor resolution of finer structure, possibly to the point that the visualization is compromised by random noise. Thus, it is advisable to test different perplexity values to ensure that the choice of perplexity does not drive the interpretation of the plot.
+
+```{r tnse1, cache = F,  message=FALSE,warning = FALSE}
+pbmc <- RunTSNE(pbmc, perplexity = 5, dims = 1:10) # Here, dims referes to the number of PCs
+p2=DimPlot(pbmc, reduction = "tsne", group.by = "celltype")
+
+```
+
+
+```{r tnse2, cache = F, message=FALSE,warning = FALSE}
+pbmc <- RunTSNE(pbmc, perplexity = 20, dims = 1:10) # Here, dims referes to the number of PCs
+p2=DimPlot(pbmc, reduction = "tsne", group.by = "celltype")
+
+```
+
+```{r tnse3, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+pbmc <- RunTSNE(pbmc, perplexity = 80, dims = 1:10) # Here, dims referes to the number of PCs
+p3=DimPlot(pbmc, reduction = "tsne", group.by = "celltype")
+
+```
+
+
+```{r fig.height=15, fig.width=15}
+
+ggarrange(p1,p2,p3, ncol=1)
+```
+
+
+# Clustering
+
+We prefer to restrict the UMAP coordinates for visualization and use the higher-rank representation for any quantitative analyses. For this, we do not perform clustering on the UMAP coordinates, but rather, we cluster on the first 10-50 PCs.
+
+Seurat v3 applies a graph-based clustering approach, building upon initial strategies in (Macosko et al). 
+The first step is construct a KNN graph based on the euclidean distance in PCA space. To cluster the cells, it applies modularity optimization techniques such as the Louvain algorithm, to iteratively group cells together, with the goal of optimizing the standard modularity function.
+
+```{r clustering, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+pbmc <- FindNeighbors(pbmc, dims = 1:10)
+
+res = c(0.2,0.4,0.5,0.7,0.9,1.2)
+pbmc <- FindClusters(pbmc, resolution = res) #cluster at multiple resolution
+
+# Display the number of cells per cluster
+table(Idents(pbmc))
+```
+
+To visualize the effect of the resolution parameter, we can plot a clustering tree
+```{r fig.height=8, fig.width=8}
+clustree(pbmc)
+```
+
+:::: {.blackbox data-latex=""}
+::: {.center data-latex=""}
+** What is the influence of the resolution parameter ? How would you pick the best resolution for your clustering results ? **
+::: 
+::::
+
+The UMAP plot can then be used for a diagnostic inspection of the clustering output.
+
+```{r plotclusters, eval=TRUE, echo=TRUE, fig.height=10, fig.width=10, message=FALSE, warning=FALSE, cache=FALSE}
+p1= DimPlot(pbmc, reduction = "umap", group.by = "SCT_snn_res.0.2")
+p2 = DimPlot(pbmc, reduction = "umap", group.by = "SCT_snn_res.0.7")
+p3= DimPlot(pbmc, reduction = "umap", group.by = "SCT_snn_res.1.2")
+p4= DimPlot(pbmc, reduction = "umap", group.by = "celltype")
+ggarrange(p1,p2,p3,p4, ncol = 2, nrow = 2)
+```
+
+Depending of the clustering resolution you pick, you need to assign it to the identities of your cells before performing the next steps.
+```{r}
+Idents(pbmc) <- pbmc$SCT_snn_res.0.7
+```
+
+
+# Finding differentially expressed genes (cluster biomarkers)
+
+`Seurat` can help you find markers that define clusters via differential expression. By default, it identifies positive and negative markers of a single cluster (specified in ident.1), compared to all other cells. 
+
+```{r markers, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(pbmc, ident.1 = 2, min.pct = 0.25)
+head(cluster2.markers, n = 5)
+```
+
+```{r}
+FeaturePlot(pbmc, features = "BACH2") + DimPlot(pbmc)
+```
+
+
+```{r fig.height=5, fig.width=5}
+# You can represent markers of cluster 2 vs all in a Volcano plot
+#retrieve top10 genes for label 
+top10 <- rownames(cluster2.markers[order(cluster2.markers$avg_log2FC, decreasing = TRUE),])[1:10]
+
+EnhancedVolcano(cluster2.markers,
+    lab = rownames(cluster2.markers),
+    selectLab =top10,
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    FCcutoff = 1.5,
+    pCutoff = 1e-05)
+```
+
+FindAllMarkers() automates this process for all clusters, but you can also test groups of clusters vs. each other, or against all cells. Seurat has several tests for differential expression which can be set with the *test.use* parameter.
+
+```{r}
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+head(pbmc.markers)
+```
+
+## Plot marker expression
+Several functions are available for visualizing marker expression. 
+
+```{r violin, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+
+VlnPlot(pbmc, features = c("MS4A1", "CD79A"))
+
+FeaturePlot(pbmc, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP",
+    "CD8A"))
+
+```
+
+DoHeatmap() generates an expression heatmap for given cells and features. In this case, we are plotting the top 20 markers (or all markers if less than 20) for each cluster.
+
+```{r heatmap, eval=TRUE, echo=TRUE, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, cache=FALSE}
+
+pbmc.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(pbmc, features = top10$gene) + NoLegend()
+
+```
+
+# Automatic cell type prediction using pre-established marker lists with Cell-ID
+
+`Cell-ID` (Cortal A. et al) is a clustering-free multivariate statistical method for the robust extraction of per-cell gene signatures from single-cell RNA-seq. It allows unbiased cell identity recognition across different donors, tissues-of-origin, model organisms and single-cell omics protocols. 
+
+`Cell-ID` is based on Multiple Correspondence Analysis (MCA), a multivariate method that allows the simultaneous representation of both cells and genes in the same low dimensional vector space. In such space, euclidean distances between genes and cells are computed, and per-cell gene rankings are obtained. The top ‘n’ closest genes to a given cell will be defined as its gene signature.
+
+```{r}
+pbmc <- RunMCA(pbmc)
+```
+```{r}
+DimPlotMC(pbmc, reduction = "mca", group.by = "celltype")
+```
+
+## Obtaining immune cell-type gene signatures
+
+PBMC dataset is representative of immune cells so we will focus our search on the immune system cell-type signatures. To that end, we used pre-established signatures available in the Pandaglob database.
+
+```{r}
+# Load cell types signatures
+celltype_sig = read.csv("./data_pbmc/PanglaoDB_markers_27_Mar_2020.tsv", sep="\t")
+head(celltype_sig)
+```
+```{r}
+dim(celltype_sig)
+colnames(celltype_sig)
+```
+
+```{r}
+# restricting the analysis to immune specific gene signatues
+immune_cell_sig <- celltype_sig %>% filter(organ == "Immune system")
+
+# restricting to human specific genes
+immune_cell_sig <- immune_cell_sig %>%  filter(str_detect(species,"Hs"))
+
+# converting dataframes into a list of vectors, which is the format needed as input for CellID
+immune_cell_sig <- immune_cell_sig %>%  
+  group_by(cell.type) %>%  
+  summarise(geneset = list(official.gene.symbol))
+
+immune_gs <- setNames(immune_cell_sig$geneset, immune_cell_sig$`cell.type`)
+str(immune_gs)
+```
+
+## Assessing per-cell gene signature enrichments against pre-established marker lists
+ 
+A per-cell assessment is performed, where the enrichment of each cell’s gene signature against each cell-type marker lists is evaluated through hypergeometric tests. No intermediate clustering steps are used here. By default, the size n of the cell’s gene signature is set to n.features = 200.
+
+By default, only reference gene sets of size ≥10 are considered. In addition, hypergeometric test p-values are corrected by multiple testing for the number of gene sets evaluated. A cell is considered enriched for gene sets in which the p-value in the hypergeometric test is <1e-02 (corresponding to a corrected p-value of -log10 >2) after Benjamini-Hochberg multiple testing correction. Default settings can be modified within the *RunCellHGT* function.
+
+The *RunCellHGT* function will provide the -log10 corrected p-value for each cell and each signature evaluated, so a multi-class evaluation is enabled. When a disjointed classification is required, a cell will be assigned to the gene set with the lowest significant corrected p-value. If no significant hits are found, a cell will remain unassigned.
+
+
+```{r}
+# Performing per-cell hypergeometric tests against the gene signature collection
+HGT_immune_gs <- RunCellHGT(pbmc, pathways = immune_gs, dims = 1:50, n.features = 200)
+
+# For each cell, assess the signature with the lowest corrected p-value (max -log10 corrected p-value)
+immune_gs_prediction <- rownames(HGT_immune_gs)[apply(HGT_immune_gs, 2, which.max)]
+
+# For each cell, evaluate if the lowest p-value is significant
+immune_gs_prediction_signif <- ifelse(apply(HGT_immune_gs, 2, max)>2, yes = immune_gs_prediction, "unassigned")
+
+# Save cell type predictions as metadata within the Seurat object
+pbmc$immune_gs_prediction <- immune_gs_prediction_signif
+```
+
+## Visualize the annotation
+The cell type predictions can be visualized on any low-dimensionality representation of choice, as illustrated here using UMAP plots. 
+
+```{r fig.height=5, fig.width=15, message=FALSE, warning=FALSE}
+p1=DimPlot(pbmc, group.by = "celltype")
+p2=DimPlot(pbmc, group.by = "immune_gs_prediction")
+p1+p2
+```
+
+
+
+# Save results
+
+You can save the object at this point so that it can easily be loaded back in without having to rerun the computationally intensive steps performed above, or easily shared with collaborators.
+
+```{r output, cache = F, eval=TRUE, echo=TRUE, message=FALSE,warning = FALSE}
+saveRDS(pbmc, file = "pbmc_output.rds")
+```
+
+# Further reading
+
+- *Orchestrating Single-Cell Analysis with Bioconductor* (https://bioconductor.org/books/release/OSCA/)
+
+- *Current best practices in single-cell RNA-seq analysis: a tutorial* (Molecular Systems Biology (2019))
+
+-  *The triumphs and limitations of computational methods for scRNA-seq* (Nature Methods (2021)) 
+
+
