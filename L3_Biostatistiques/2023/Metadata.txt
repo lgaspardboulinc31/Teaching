@@ -1,0 +1,16 @@
+Chaque ligne correspondont à un individu différent pour lequel la composition du microbiote intestinal a été caractérisée à un moment donné par métabarcoding.
+
+Les données suivantes sont à disposition :
+`sample_me`: identifiant BioSample
+`sample_ID`: identifiant in GMRepo
+`sequencing_instrument`: instrument de séquençage
+`total_nb_reads`: nombre total de reads bactériens séquencés pour l'échantillon
+`phenotype`: phénotype de l'individu (sain ou présentant certaines maladies)
+`country`: pays de résidence de l'individu
+`collection_date`: date d'échantillonnage
+`sex`: sexe de l'individu
+`age`: âge de 
+`diet`: régime alimentaire de l'individu
+`BMI`: indice de masse corporelle (IMC) de l'individu
+`min_days_without_antibiotics_use`: nombre de jour minimum depuis la dernière prise d'antibiotiques
+`RA_X`: abondance relative (RA) pour le genre bactérien 'X' dans le microbiote de l'individu
