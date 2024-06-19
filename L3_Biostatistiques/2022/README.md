@@ -8,6 +8,6 @@ Le projet se déroule en trois temps. Une première partie où les étudiants et
 
 Dans ce repertoire, vous trouverez :
 
-    les données et métadonnées : Data et Metadata
-    un notebook de correction de la partie guidée : Notebook
-    le sujet du projet de biostatistiques dans son integralité : Sujet
+    - les données et métadonnées : Data et Metadata
+    - un notebook de correction de la partie guidée : Notebook
+    - le sujet du projet de biostatistiques dans son integralité : Sujet
