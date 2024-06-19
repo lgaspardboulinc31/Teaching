@@ -7,7 +7,6 @@ La cohorte est constituée de patientes diagnostiquées entre 2006 et 2010 avec 
 Le projet se déroule en trois temps. Une première partie où les étudiants et étudiantes sont guidé.es pour appréhender le jeu de données (analyses generales et representations graphiques). Dans un second temps, elles et ils sont amenés à realiser des tests statistiques pour observer les relations entre les differentes variables. Finalement, ils et elles font le choix d'une problematique liée au jeu de données qu'ils traitent au cours de plusieurs séances de TD et qui aboutit à un rendu de deux pages et une presentation.
 
 Dans ce repertoire, vous trouverez :
-
     - les données et métadonnées : Data et Metadata
     - un notebook de correction de la partie guidée : Notebook
     - le sujet du projet de biostatistiques dans son integralité : Sujet
