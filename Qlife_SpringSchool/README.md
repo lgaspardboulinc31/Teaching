@@ -10,6 +10,8 @@ The Qlife program in Quantitative Biology of the PSL University organizes a spri
 During the Spring School, we provided a workshop untitled "Spatial transcriptomics data analysis for cancer research" with Emma Molière and Florence Cavalli. 
 Spatial transcriptomics is a fast-evolving field in both technological and methodological development. It has been widely adopted over the past 2-3 years and is a powerful tool to decipher in situ transcriptome. Cancer is renowned to be anaplastic/dysplastic with uncontrolled cell proliferation, however recent studies showed that some tumors may display spatial architecture like immune cell infiltrates, fibroblasts etc. coherent with the body of work from pathology. Leveraging spatial transcriptomics to better describe spatial heterogeneities is an important topic this workshop will focus on. We will perform the analysis of a 10X Visium brain tumor glioblastoma slide. We will cover first the data generation, annotation and quality control parts. We will then perform clustering, deconvolution with the use of a single-cell reference dataset and predict cell-cell interactions. This will allow the user to become familiar with the data analysis and have the opportunity to question the key steps of the analysis.
 
+The compiled version of the notebook can be retrieved here: [http://xfer.curie.fr/get/Vlqygvkyu0V/Qlife_ST_for_cancer.html](http://xfer.curie.fr/get/Vlqygvkyu0V/Qlife_ST_for_cancer.html)
+
 ### Dataset
 
 We rely on public datasets that can be retrieved from: 
@@ -21,3 +23,4 @@ We rely on public datasets that can be retrieved from:
 ### Environment
 
 The workshop was tested on R version 4.4.2 "Pile of Leaves" with an R environment built using renv package. We provide in the folder the `renv.lock` file to build it again and run the workshop. 
+The notebook takes about 40min to compile on MacBook Pro Apple M1 with 32Gb memory. 
