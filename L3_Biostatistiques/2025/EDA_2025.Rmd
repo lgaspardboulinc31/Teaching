@@ -1,0 +1,414 @@
+---
+title: "Exploratory Analysis of MSK-MET data"
+author: "Lucie Gaspard-Boulinc"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Context d'analyse
+Le jeu de données MSK-MET contient les informations de **25,000 patients** atteints de multiples cancers. Ce type
+de cohorte est appelée une **cohorte pan-cancer**. Avec les **informations cliniques** (sexe, age, données diagnos-
+tics), ce jeu de données contient des informations sur les caractérstiques génomiques des cancers primaires et des
+métastases telles les mutations, l’instabilité microsatellite ou la fraction de génome alteré. Au total, XXX variables
+sont disponibles dans ce jeu de données.
+
+Les variables sont rapport´ees dans le fichier (MSKMET_pan_cancer.csv). Vous trouverez la description de
+chaque variable dans le fichier MSKMET_pancancer_description.csv. **Vous ferez particulièrement attention
+dans votre analyse à selectionner les colonnes pertinentes pour la question biologique que vous souhaitez
+résoudre.**
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Environment
+```{r echo=TRUE}
+library(ggplot2)
+library(reshape2)
+library(ggpubr)
+```
+
+
+# Chargement des fichiers et controles de l'importation
+
+```{r echo=TRUE}
+# Données du projet
+MSK_MET <- read.csv("./data/MSKMET_pan_cancer.csv", row.names = 1)
+head(MSK_MET)
+```
+```{r echo=FALSE}
+cat(paste0("Il y a ",dim(MSK_MET)[1]," patients dans le jeu de données et ", dim(MSK_MET)[2], " variables."))
+```
+
+
+```{r}
+# Description des colonnes
+MSK_MET_description <-  read.csv("./data/MSKMET_pancancer_description.csv", row.names = 1, sep=";")
+MSK_MET_description
+```
+
+
+# Description des variables 
+
+### 1. De quel type sont les variables du jeu de données (qualitatives, quantitatives, discrètes, continues...) ?
+
+```{r results = 'hide'}
+# Commande globale à connaitre
+str(MSK_MET)
+```
+```{r results = 'hide'}
+# Pour seulement les premières colonnes
+str(MSK_MET[,1:30])
+
+# Pour les colonnes commencant par DMETS_* et CNA_* (avec rappel de la commande grepl)
+str(MSK_MET[,grepl("DMETS_*", colnames(MSK_MET))]) 
+str(MSK_MET[,grepl("CNA_*", colnames(MSK_MET))])
+```
+```{r}
+# Afficher le nom des colonnes qui sont des variables numériques
+col_numeriques <- unlist(lapply(colnames(MSK_MET), function(col){
+  return(is.double(MSK_MET[,col]))
+}))
+
+cat(paste0("Les colonnes ", paste0(colnames(MSK_MET[, col_numeriques]), collapse = ", "), " sont des colonnes numériques."))
+```
+
+### 2. Lesquelles contiennent des valeurs manquantes ? En quelles proportions ?
+
+```{r}
+# Fonction pour compter les NA: is.na
+table(is.na(MSK_MET$OS_STATUS))
+
+# Faisons le comptage pour tous les patients
+nombre_na <- colSums(is.na(MSK_MET))  # Compte les NA dans chaque colonne
+na_proportions <- nombre_na / nrow(MSK_MET)  # Proportions de NA
+
+# Sous forme de tableau 
+na_summary <- data.frame(
+  Column = names(nombre_na),
+  Nombre_NA = nombre_na,
+  Proportion = na_proportions
+)
+
+na_summary[order(na_summary$Nombre_NA, decreasing = TRUE),]
+
+```
+
+### 3. Calculez les informations statistiques (moyenne, médiane, écart-type) que l’on peut obtenir sur ces variables.
+
+```{r}
+# On garde uniquement les variables numériques
+MSK_MET_num <- MSK_MET[, col_numeriques]
+
+# On peut utiliser la fonction summary()
+summary(MSK_MET_num)
+```
+
+
+
+```{r results = 'hide'}
+# Ou alors calculer individuellement
+mean(MSK_MET_num$OS_MONTHS) # ici, on n'enleve pas les NA donc retourne NA
+mean(MSK_MET_num$OS_MONTHS, na.rm = TRUE)
+
+sd(MSK_MET_num$OS_MONTHS, na.rm = TRUE)
+quantile(MSK_MET_num$OS_MONTHS, na.rm=TRUE)
+
+min(MSK_MET_num$OS_MONTHS,na.rm=TRUE)
+max(MSK_MET_num$OS_MONTHS,na.rm=TRUE)
+```
+
+### 4. Représentez graphiquement la distribution de ces variables (e.g. histogrammes, boxplots)
+
+#### 4.1. Exemple pour une variable catégorielle: le sexe des patients
+
+```{r fig.height=5, fig.width=15, warning=FALSE}
+# Plot classique
+p1 <- ggplot(MSK_MET, aes(x=SEX)) + geom_histogram(stat="count")
+
+# Avec des couleurs
+color_pal <- c("grey","blue","red")
+p2 <- ggplot(MSK_MET, aes(x=SEX, fill=SEX)) + geom_histogram(stat="count") + scale_fill_manual(values=color_pal)
+
+# En affichant l'effectif
+p3 <- ggplot(MSK_MET, aes(x=SEX, fill=SEX)) + geom_histogram(stat="count") + scale_fill_manual(values=color_pal)+
+geom_text(
+    stat = "count",  # Calcule les effectifs
+    aes(label = after_stat(count)),  # Affiche les effectifs au-dessus des barres
+    vjust = -0.5  # Position au-dessus des barres
+  )
+
+ggarrange(p1,p2,p3, ncol=3)
+```
+
+#### 4.2. Exemple pour une variable numérique: fraction de genome altéré (FGA)
+
+```{r fig.height=5, fig.width=15}
+# Plot classique
+p1 <- ggplot(MSK_MET, aes(x=FGA)) + geom_histogram(stat="count") + labs(title= "Histogramme")
+
+# Density
+p2 <- ggplot(MSK_MET, aes(x=FGA)) + geom_density() + labs(title= "Densité")
+
+# Avec les statistiques
+p3 <- ggplot(MSK_MET, aes(x=FGA)) + geom_histogram(stat="count") + geom_vline(xintercept = mean(MSK_MET$FGA), color="blue")+
+  geom_vline(xintercept = mean(MSK_MET$FGA)-sd(MSK_MET$FGA), color="green")+
+  geom_vline(xintercept = mean(MSK_MET$FGA)+sd(MSK_MET$FGA), color="green")+
+  labs(title="Histogramme avec la moyenne et l'écart type")
+  
+
+ggarrange(p1,p2,p3, ncol=3)
+```
+
+#### 4.2. Exemple pour un croisement entre une variable catégorielle et une variable numérique: AGE_AT_DEATH et CANCER_TYPE
+```{r fig.height=5, fig.width=15, warning=FALSE}
+# Version BOXPLOT
+p1 <- ggplot(MSK_MET, aes(x=CANCER_TYPE, y=AGE_AT_DEATH)) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +labs(title="Version Boxplot")
+
+# Version VIOLIN PLOT
+p2 <- ggplot(MSK_MET, aes(x=CANCER_TYPE, y=AGE_AT_DEATH)) + geom_violin()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))+labs(title="Version ViolinPlot")
+
+ggarrange(p1,p2)
+```
+
+### 5. Combien y'a-t-il d'echantillons issus de patients avec des métastases ? Combien par sous-type de cancer ? Faire les représentations appropriées.
+
+```{r fig.height=5, fig.width=15, message=FALSE, warning=FALSE}
+# La colonne qui contient cette information est SAMPLE_TYPE
+table(MSK_MET$SAMPLE_TYPE)
+cat(paste0(" Il y a ",table(MSK_MET$SAMPLE_TYPE)[1], " échantillons métastatique"))
+
+# La colonne qui contient le type de cancer est CANCER_TYPE
+Sample_type_per_cancer <- as.data.frame(table(MSK_MET$SAMPLE_TYPE, MSK_MET$CANCER_TYPE)) # Format long
+colnames(Sample_type_per_cancer) <- c("SAMPLE_TYPE", "CANCER_TYPE", "Freq")
+
+# Representation 
+ggplot(Sample_type_per_cancer, aes(x=CANCER_TYPE, y=Freq, fill=SAMPLE_TYPE)) + geom_bar(stat = "identity") + theme(axis.text.x=element_text(angle=45, hjust=1))
+
+
+# Pareil mais pour SUBTYPE
+Sample_type_per_subtype <- as.data.frame(table(MSK_MET$SAMPLE_TYPE, MSK_MET$SUBTYPE)) # Format long
+colnames(Sample_type_per_subtype) <- c("SAMPLE_TYPE", "SUBTYPE", "Freq")
+ggplot(Sample_type_per_subtype, aes(x=SUBTYPE, y=Freq, fill=SAMPLE_TYPE)) + geom_bar(stat = "identity") + theme(axis.text.x=element_text(angle=45, hjust=1))
+
+```
+
+```{r fig.height=10}
+# Proposition de correction avec un RIVER PLOT: example avec les cancers situés dans le thorax
+library(ggalluvial)
+
+# Extraction des données
+thoracic_cancer_data <- MSK_MET[MSK_MET$ORGAN_SYSTEM == "Thoracic",]
+df <- as.data.frame(table(thoracic_cancer_data$CANCER_TYPE,thoracic_cancer_data$SUBTYPE, thoracic_cancer_data$SAMPLE_TYPE))
+colnames(df) <- c("CANCER_TYPE", "SUBTYPE", "SAMPLE_TYPE", "Freq")
+
+# Filtrage des données où il y a 0 patients
+df <- df[df$Freq >0,]
+
+# Faire le plot
+ggplot(df,
+       aes(y = Freq, axis1 = SAMPLE_TYPE, axis2 = CANCER_TYPE, axis3=SUBTYPE)) +
+  geom_alluvium(aes(fill = SUBTYPE), width = 1/12) +geom_stratum(width = 1/12, fill = "grey", color = "black") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum)))
+```
+
+### 6. Combien d'echantillons de tumeurs primaires ont été etudié chez des patients présentant déja un cancer métastatiques ? Combien par sous-type de cancer ? Faire les représentations appropriées.
+
+```{r fig.height=5, fig.width=20, warning=FALSE}
+# On selectionne d'abord les patients dont la tumeur primaire est étudiée
+MSK_MET_primary <- MSK_MET[MSK_MET$SAMPLE_TYPE == "Primary",]
+#dim(MSK_MET_primary) 15632 patients
+
+# La variable qui indique s'il y a des métastases identifiées est IS_DIST_MET_MAPPED
+table(MSK_MET_primary$IS_DIST_MET_MAPPED)
+
+# On peut aussi le calculer pour chaque type de cancer
+primary_cancer_type <- as.data.frame(table(MSK_MET_primary$IS_DIST_MET_MAPPED, MSK_MET_primary$CANCER_TYPE))
+colnames(primary_cancer_type) <- c("IS_DIST_MET_MAPPED", "CANCER_TYPE", "Freq")
+primary_cancer_subtype <- as.data.frame(table(MSK_MET_primary$IS_DIST_MET_MAPPED, MSK_MET_primary$SUBTYPE))
+colnames(primary_cancer_subtype) <- c("IS_DIST_MET_MAPPED", "SUBTYPE", "Freq")
+
+
+# Et les graphiques
+ ggplot(primary_cancer_type, aes(x=CANCER_TYPE, y=Freq, fill=IS_DIST_MET_MAPPED)) + geom_bar(stat = "identity") + theme(axis.text.x=element_text(angle=45, hjust=1))
+ 
+ggplot(primary_cancer_subtype, aes(x=SUBTYPE, y=Freq, fill=IS_DIST_MET_MAPPED)) + geom_bar(stat = "identity") + theme(axis.text.x=element_text(angle=45, hjust=1))
+
+```
+
+# Analyse statistique des données 
+
+### 1. Les tumeurs primaires présentent-elles significativement plus d'altération génomiques que les métastases ? Est-ce dépendant du stype de cancer ?
+
+Nous nous plaçons ici dans la cadre de la comparaison entre échantillons de tumeurs primaires et les métastases. Les altérations génomiques sont présentées de multiples façon: la fraction de génome alteré (FGA), la charge mutationelle (TMB_NONSYNONYMOUS) ainsi que le nombre de CNV (CNA_*). On peut donc effectuer plusieurs comparaisons. Je donne ici l'example avec le FGA.
+
+```{r fig.height=5, fig.width=10}
+# Visualisation du FGA
+p1 <- ggplot(MSK_MET, aes(x=SAMPLE_TYPE, y=FGA, fill=SAMPLE_TYPE)) + geom_boxplot()
+p2 <- ggplot(MSK_MET, aes(x=FGA, color=SAMPLE_TYPE)) + geom_density()
+p3 <- ggplot(MSK_MET, aes(x=SAMPLE_TYPE, y=TMB_NONSYNONYMOUS, fill=SAMPLE_TYPE)) + geom_boxplot()
+p4 <- ggplot(MSK_MET, aes(x=TMB_NONSYNONYMOUS, color=SAMPLE_TYPE)) + geom_density()
+ggarrange(p1,p2,p3,p4, ncol = 2, nrow = 2)
+
+# Test statistique: on teste une différence de moyenne sur des données qui ne sont pas normalement distribué. Les deux groupes sont indépendants (pas les memes individus)
+primary_group_FGA <- MSK_MET[MSK_MET$SAMPLE_TYPE == "Primary", "FGA"]
+metastasis_group_FGA <- MSK_MET[MSK_MET$SAMPLE_TYPE == "Metastasis", "FGA"]
+
+test <- wilcox.test(x=primary_group_FGA, y=metastasis_group_FGA)
+print(test)
+```
+On peut aussi s'interesser en fonction du type (voir meme du sous-type) de cancer.
+```{r fig.height=5, fig.width=10}
+# Graphique
+ggplot(MSK_MET, aes(x=CANCER_TYPE, y=FGA)) + geom_boxplot() + theme(axis.text.x=element_text(angle=45, hjust=1))
+ggplot(MSK_MET, aes(x=CANCER_TYPE, y=FGA, fill=SAMPLE_TYPE)) + geom_boxplot() + theme(axis.text.x=element_text(angle=45, hjust=1))
+
+```
+On observe déjà que la distribution du FGA n'est pas equivalente dans tous les types de cancers. Les cancers de l'ovraires semblent présenter en moyenne une plus grande fraction du genome altéré alors que les cancers de la thyroides semblent peu altérés.On va écrire une boucle pour tester par type de cancer.
+
+```{r fig.height=5, fig.width=20}
+test_results <- list()
+sig_test <- c()
+sig_FGA_plot <- list() 
+
+for (cancer_type in unique(MSK_MET$CANCER_TYPE)){
+  # Isoler les données
+  df <- MSK_MET[MSK_MET$CANCER_TYPE == cancer_type,]
+  df$SAMPLE_TYPE <- as.factor(df$SAMPLE_TYPE)
+  
+  # Fais le test
+  test <- wilcox.test(FGA ~ SAMPLE_TYPE, data = df)
+  
+  if (test$p.value < 0.05){
+    sig_test <- c(sig_test,cancer_type) # gardons le nom du cancer
+    print(paste0("Le test est significatif pour ", cancer_type))
+    
+    sig_FGA_plot[[cancer_type]] <- ggplot(df, aes(x = SAMPLE_TYPE, y = FGA, fill = SAMPLE_TYPE)) + 
+      geom_boxplot() + 
+      annotate("text", 
+    x = 1.5,  # Position sur l'axe x (entre "Primary" et "Metastasis")
+    y = max(df$FGA) * 1.1,  # Position sur l'axe y (au-dessus des boîtes)
+    label = paste0("p = ", signif(test$p.value, digits = 3)),  # Affiche la p-value
+    size = 4,
+    color = "black"
+  ) + labs(title=cancer_type)+
+      theme_minimal()
+  }
+  test_results[[cancer_type]] <- test
+}
+
+ggarrange(plotlist = sig_FGA_plot, ncol=4)
+```
+
+### 2. Y-a-t-il des évènements génétiques plus fréquents dans les tumeurs primaires que les métastases? 
+
+Nous allons prendre l'exemple du gène AR (Androgene receptor) pour démontrer comment nous pouvons tester. Il faut d'abord calculer la table de contingence du nombre de tumeurs par SAMPLE_TYPE qui porte une altération (ici, on s’intéresse uniquement aux délétions et amplifications).
+
+```{r}
+# Table de contingence
+AR_contigence <- table(MSK_MET$CNA_AR, MSK_MET$SAMPLE_TYPE)
+
+chisq.test(AR_contigence)
+```
+Le p-value < 0.05 du test indique que les différences observées entre les distributions des CNA (amplification, neutre, délétion) pour les tumeurs primaires et les métastases sont statistiquement significatives.
+
+### 3. Evaluez le lien entre la charge métastatique et la survie globale.
+
+```{r fig.height=5, fig.width=25, message=FALSE, warning=FALSE}
+
+# On teste pour tous les types cancers
+corr_results <- list()
+corr_plot <- list() 
+for (cancer_type in unique(MSK_MET$SUBTYPE)){
+  #Donnees
+  df <- MSK_MET[MSK_MET$SUBTYPE == cancer_type, c("OS_MONTHS","MET_SITE_COUNT")]
+  # Test de correlation 
+  test <- cor.test(x=df$OS_MONTHS, y=df$MET_SITE_COUNT, method="spearman")
+  if (test$p.value < 0.05){
+    print(paste0("Le test est significatif pour ", cancer_type))
+    corr_plot[[cancer_type]] <- ggplot(df, aes(x=OS_MONTHS, y=MET_SITE_COUNT)) + geom_point() + 
+      labs(title=paste0(cancer_type, " - Correlation coefficient:", test$estimate,", P-value=", test$p.value))
+  }
+  
+}
+
+ggarrange(plotlist=corr_plot, ncol = 5)
+```
+### 4. Les tumeurs primaires de patients métastatiques possèdent-elles d'avantage d'altérations génétique que les tumeurs primaires de patients non metastatique ?
+On se concentre ici uniquement sur les échantillons issus de tumeurs primaires, comme proposé à la question 6 de la partie 1. 
+
+```{r}
+head(MSK_MET_primary)
+```
+```{r}
+# Table de contingence des effectifs entre patients metastatiques et patients non metastatiques
+table(MSK_MET_primary$IS_DIST_MET_MAPPED)
+```
+
+```{r fig.height=5, fig.width=20}
+p1 <- ggplot(MSK_MET_primary, aes(x=IS_DIST_MET_MAPPED, y=FGA, fill=IS_DIST_MET_MAPPED)) + geom_boxplot()
+p2 <- ggplot(MSK_MET_primary, aes(x=IS_DIST_MET_MAPPED, y=TMB_NONSYNONYMOUS, fill=IS_DIST_MET_MAPPED)) + geom_boxplot()
+p3 <- ggplot(MSK_MET_primary, aes(x=IS_DIST_MET_MAPPED, y=OS_MONTHS, fill=IS_DIST_MET_MAPPED)) + geom_boxplot()
+
+ggarrange(p1,p2,p3, ncol=3)
+```
+
+Sur cette question, il faudra faire attention aux autres variables et à bien décrire la population. 
+
+### 5. Certains cancers colorectaux ont la particularité de porter une mutation dans le système de réparation de l'ADN (MMR), donnant alors un phénotype d'hypermutabilité de l'ADN  appelé instabilité microsatellite (MSI) et qui est souvent de meilleur prognostic. Dans ce cancer, évaluer les différences entre les patients MSI stable et MSI instables. Vous pourez aussi utiliser le score MSI. 
+
+```{r fig.height=5, fig.width=20}
+# On isole d'abord les données
+colorectal_cancer <- MSK_MET[MSK_MET$CANCER_TYPE == "Colorectal Cancer",]
+
+# On fait ensuite des representations
+p1 <- ggplot(colorectal_cancer, aes(x=MSI_TYPE, y=OS_MONTHS, fill=MSI_TYPE))+ geom_boxplot()
+p2 <- ggplot(colorectal_cancer, aes(x=MSI_TYPE, y=AGE_AT_EVIDENCE_OF_METS,fill=MSI_TYPE))+ geom_boxplot()
+p3 <- ggplot(colorectal_cancer, aes(x=MSI_TYPE, y=TMB_NONSYNONYMOUS,fill=MSI_TYPE))+ geom_boxplot()
+p4 <- ggplot(colorectal_cancer, aes(x=MSI_TYPE, y=FGA,fill=MSI_TYPE))+ geom_boxplot()
+
+ggarrange(p1,p2,p3,p4, ncol=4)
+```
+Dans cette question, on pourra aussi différencier les patients dont on analyse la tumeur primaire vs les patients dont on analyse une metastase.
+
+
+# 6. Evaluer, pour les métastases, le lien entre la fraction de génome altéré et le lieu de la métastase pour chaque sous-type de cancer. 
+
+```{r fig.height=5, fig.width=20}
+# On isole les données: métastases du cerveaux
+brain_mets <- MSK_MET[MSK_MET$SAMPLE_TYPE == "Metastasis" & MSK_MET$METASTATIC_SITE == "CNS/Brain",]
+
+# Avec la table de contingence, on peut supprimer les types de cancer avec moins de 10 individus
+indiv <- as.data.frame(table(brain_mets$CANCER_TYPE))
+indiv <- indiv[indiv$Freq > 10,]
+
+brain_mets <- brain_mets[brain_mets$CANCER_TYPE %in% indiv$Var1,]
+
+# On fait un graphique en fonction du type ou sous-type de cancer
+ggplot(brain_mets, aes(x=CANCER_TYPE, y=FGA, fill=CANCER_TYPE)) + geom_boxplot()+ theme(axis.text.x=element_text(angle=45, hjust=1)) + ylab("FGA of Brain/CNS metastasis")
+ggplot(brain_mets, aes(x=SUBTYPE, y=FGA)) + geom_boxplot()+ theme(axis.text.x=element_text(angle=45, hjust=1)) + ylab("FGA of Brain/CNS metastasis")
+
+```
+De façon surprenante, l'article mentionne "CNS/brain metastases from patients with lung adenocarcinoma, MSS colorectal cancer, and cutaneous melanoma had a significantly higher FGA". 
+
+
+# 7. Y-a-t-il un organotropisme métastatique dans les cancers du sein ?
+
+```{r fig.height=5, fig.width=15}
+Breast_patients <- MSK_MET[MSK_MET$CANCER_TYPE == "Breast Cancer" & (MSK_MET$SAMPLE_TYPE == "Metastasis" | MSK_MET$IS_DIST_MET_MAPPED == TRUE),]
+
+df <- Breast_patients[,grepl("DMETS_", colnames(Breast_patients))]
+df_logical <- df == "Yes"
+freq <- as.data.frame(colSums(df_logical))
+freq$MET_loc <- rownames(freq)
+  
+# Résultat final
+ggplot(freq[-1,], aes(x=MET_loc, y=`colSums(df_logical)`)) + geom_bar(stat="identity")+ theme(axis.text.x=element_text(angle=45, hjust=1)) +ylab("Number of patients with at least one met") + xlab("Localisation des métastases des cancers du sein")
+```
+
+
+
