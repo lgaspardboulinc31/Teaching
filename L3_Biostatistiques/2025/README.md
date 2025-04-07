@@ -1,0 +1,3 @@
+# Projet de biostatistique 2025
+
+Le projet proposé porte sur l’analyse d’un jeu de données collectées aux États-Unis dans le cadre du programme MSK-MET (Memorial Sloan Kettering - Metastatic Events and Tropism). L'organotropisme métastatique, caractérise l’affinité des métastases d’un cancer donné pourun tissu. L’hypothèse classique de la semence et du sol, selon laquelle les cellules cancéreuses disséminées colonisent de préférence les organes qui permettent leur propre croissance et sont compatibles avec celle-ci, est étudiée depuis plus d’un siècle. Pourtant, il reste beaucoup à apprendre sur l’interaction entre les caractéristiques génomiques des tumeurs et le potentiel m´etastatique, ainsi que sur les sch´emas de m´etastases sp´ecifiques aux organes.
